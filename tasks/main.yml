@@ -1,0 +1,127 @@
+---
+# Additional Nginx configuration including Let's Encrypt
+# Should be run when less than 30 days remain on the certificate
+
+
+
+# Assume Nginx is already installed
+# - role: ome.nginx
+
+# If we're not using letsencrypt assume this is CI so use a self-signed cert
+- name: Include ome.ssl_certificate when not letsencrypt
+  include_role:
+    name: ome.ssl_certificate
+  when: not (https_letsencrypt_enabled | default(False))
+
+# Lets encrypt with automatic renewal
+# This will stop nginx when the certificate is first created
+# For renewals we configure Nginx to serve the challenge
+
+- name: include ome.certbot when using letsencrypt
+  include_role:
+    name: ome.certbot
+    apply:
+      become: true
+  vars:
+    certbot_create_if_missing: yes
+    certbot_admin_email: "{{ letsencrypt_email }}"
+    certbot_domains:
+      - "{{ https_certificate_domain }}"
+    certbot_create_standalone_stop_services:
+      - nginx
+    certbot_auto_renew_deploy_hooks:
+      - systemctl reload nginx
+    certbot_auto_renew_args: --webroot --webroot-path /srv/www/letsencrypt/
+  # May be useful for testing:
+  #certbot_create_args: --test-cert
+  #certbot_auto_renew_args: --test-cert --force-renewal --webroot --webroot-path /srv/www/letsencrypt/
+  # WARNING: If you have a test certificate and need to convert it to a
+  # real certificate you may need to run
+  #   rm -rf /etc/letsencrypt/*
+  when: https_letsencrypt_enabled | default(False)
+
+
+        
+- name: letsencrypt nginx configuration
+  become: yes
+  copy:
+    content: |
+        location /.well-known/ {
+            alias /srv/www/letsencrypt/.well-known/;
+        }
+
+        listen 443 ssl http2;
+        ssl_certificate {{ (https_letsencrypt_enabled | default(False)) | ternary(https_letsencrypt_cert_path + '/fullchain.pem', ssl_certificate_public_path) }};
+        ssl_certificate_key {{ (https_letsencrypt_enabled | default(False)) | ternary(https_letsencrypt_cert_path + '/privkey.pem', ssl_certificate_key_path) }};
+        ssl_protocols  TLSv1.2 TLSv1.3;
+        ssl_prefer_server_ciphers on;
+        ssl_ciphers ECDH+AESGCM:ECDH+AES256-CBC:ECDH+AES128-CBC:DH+3DES:!ADH:!AECDH:!MD5;
+    
+        if ($ssl_protocol = "") {
+          rewrite ^/(.*) https://$host/$1 permanent;
+        }
+    dest: /etc/nginx/conf.d-nested-includes/https.conf 
+  notify:
+    - reload nginx
+
+- name: OMERO.server create certificate directory
+  become: true
+  file:
+    path: "{{omero_server_certificate_directory | default('/OMERO/certs')}}"
+    state: directory
+          
+- name: OMERO.server re-use letsencrypt generated certificate | convert to pkcs12 format 
+  become: true
+  command: >-
+    openssl pkcs12
+    -export
+    -out server.p12
+    -inkey "{{https_letsencrypt_cert_path}}/privkey.pem"
+    -in "{{https_letsencrypt_cert_path}}/fullchain.pem"
+    -password pass:{{
+    omero_server_config_set['omero.glacier2.IceSSL.Password'] | quote }}
+  args:
+    chdir: "{{omero_server_certificate_directory | default('/OMERO/certs')}}"
+    creates: server.p12
+        
+- name: Certificates | copy privkey.pem to OMERO server certs directory
+  become: true
+  copy:
+    src: "{{https_letsencrypt_cert_path}}/privkey.pem"
+    dest: "{{omero_server_certificate_directory | default('/OMERO/certs')}}/privkey.pem"
+    owner: root
+    group: root
+    mode:  '0644'
+    remote_src: yes
+        
+- name: Certificates | copy fullchain.pem to OMERO server certs directory
+  become: true
+  copy:
+    src: "{{https_letsencrypt_cert_path}}/fullchain.pem"
+    dest: "{{omero_server_certificate_directory | default('/OMERO/certs')}}/fullchain.pem"
+    owner: root
+    group: root
+    mode:  '0644'
+    remote_src: yes      
+
+- name: Certificates | set file attributes on server.p12 file generated earlier
+  become: true
+  file:
+    path: "{{omero_server_certificate_directory | default('/OMERO/certs')}}/server.p12"
+    owner: root
+    group: root
+    mode: '0644'
+      
+- name: stop omero-server
+  become: true
+  service:
+    name: omero-server
+    state: stopped 
+            
+- name: start omero-server
+  become: true
+  service:
+    name: omero-server
+    state: started           
+              
+      
