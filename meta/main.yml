@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  author: stephenogg from ome
+  description: Manage SSL certificates for web/omero acess
+  company: 
+  license: BSD
+  min_ansible_version: 2.3
+  platforms:
+    - name: EL
+      versions:
+        - 7
+    - name: Ubuntu
+      versions:
+        - focal
+  role_name: letsencrypt
+  galaxy_tags: []
+
+dependencies: []
