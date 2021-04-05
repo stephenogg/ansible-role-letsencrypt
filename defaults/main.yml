@@ -4,8 +4,8 @@
 
 vars:
 
-  https_certificate_domain: omerocloud.med.ualberta.ca
-  letsencrypt_email: sogg@ualberta.ca  
+  https_certificate_domain: "localhost"
+  letsencrypt_email: "sogg@ualberta.ca"  
   omero_server_certificate_directory: "/OMERO/certs"
   https_letsencrypt_enabled: true
 # This must match the expectations of certbot, do not change this:
